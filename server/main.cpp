@@ -1,5 +1,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -47,6 +48,23 @@ int main() {
         return 1;
     }
     std::cout << "客户端已连接，文件描述符为：" << client_fd << std::endl;
+
+    // 消息接收循环
+    char buffer[1024];
+    while (true) {
+        ssize_t received = recv(client_fd, buffer, sizeof(buffer), 0);
+        if (received == -1) {
+            std::perror("接收出错");
+            break;
+        } else if (received == 0) {
+            std::cout << "客户端发送结束，连接关闭" << std::endl;
+            break;
+        }
+        std::cout << "收到" << received << "Byte(s): ";
+        std::cout.write(buffer, received);
+        std::cout << "\n";
+    }
+
     close(client_fd);
     close(server_fd);
 

@@ -47,7 +47,12 @@ int main() {
             std::cout << "对话结束，再见！\n";
             break;
         }
-        std::cout << "你发送了：" << line << std::endl;
+        ssize_t sent = send(socket_fd, line.data(), line.size(), MSG_NOSIGNAL);
+        if (sent == -1) {
+            std::perror("发送失败");
+            break;
+        }
+        std::cout << "本次发送: " << sent << "/" << line.size() << " Byte(s)\n";
     }
 
     // 循环结束回收资源
