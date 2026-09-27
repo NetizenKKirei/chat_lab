@@ -19,15 +19,33 @@ int main() {
     address.sin_port = htons(9000);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    int result = bind(server_fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
-
-    if (result == -1) {
+    int bind_result = bind(server_fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+    if (bind_result == -1) {
         std::perror("bind 失败");
         close(server_fd);
         return 1;
     }
+    std::cout << "绑定成功 127.0.0.1:9000" << std::endl;
 
-    std::cout << "绑定成功: 127.0.0.1:9000" << std::endl;
+    int listen_result = listen(server_fd, 7);
+    if (listen_result == -1) {
+        std::perror("监听失败");
+        close(server_fd);
+        return 1;
+    }
+    std::cout << "开始监听 127.0.0.1:9000" << std::endl;
+
+    std::cout << "等待客户端连接……" << std::endl;
+    int client_fd = accept(server_fd, nullptr, nullptr);
+    if (client_fd == -1) {
+        std::perror("客户端连接失败");
+        close(server_fd);
+        return 1;
+    }
+    std::cout << "客户端已连接，文件描述符为：" << client_fd << std::endl;
+    close(client_fd);
     close(server_fd);
+
+
     return 0;
 }
