@@ -7,6 +7,7 @@
 #include <ostream>
 
 int main() {
+    // 创建服务器监听socket
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
         std::perror("socket 创建失败");
@@ -14,6 +15,7 @@ int main() {
     }
     std::cout << "创建成功！文件描述符为：" << server_fd << std::endl;
 
+    // 设置监听socket地址并绑定
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(9000);
@@ -27,6 +29,7 @@ int main() {
     }
     std::cout << "绑定成功 127.0.0.1:9000" << std::endl;
 
+    // server监听逻辑
     int listen_result = listen(server_fd, 7);
     if (listen_result == -1) {
         std::perror("监听失败");
@@ -35,6 +38,7 @@ int main() {
     }
     std::cout << "开始监听 127.0.0.1:9000" << std::endl;
 
+    // server连接逻辑
     std::cout << "等待客户端连接……" << std::endl;
     int client_fd = accept(server_fd, nullptr, nullptr);
     if (client_fd == -1) {
@@ -45,7 +49,6 @@ int main() {
     std::cout << "客户端已连接，文件描述符为：" << client_fd << std::endl;
     close(client_fd);
     close(server_fd);
-
 
     return 0;
 }
