@@ -32,6 +32,8 @@ int main() {
     }
     std::cout << "已连接服务器" << std::endl;
 
+    char buffer[4];  // 接收数组
+
     // 本地输入循环
     while (true) {
         std::string line;
@@ -53,6 +55,26 @@ int main() {
             break;
         }
         std::cout << "本次发送: " << sent << "/" << line.size() << " Byte(s)\n";
+
+        // 接收回显
+        long total_recv = 0;
+        while (total_recv < sent) {
+            ssize_t received = recv(socket_fd, buffer, sizeof(buffer), 0);
+            if (received == -1) {
+                std::perror("接收错误");
+                break;
+            } else if (received == 0) {
+                std::cout << "服务端发送结束，连接关闭" << std::endl;
+                break;
+            }
+            std::cout << "收到" << received << "Byte(s): ";
+            std::cout.write(buffer, received);
+            std::cout << "\n";
+            total_recv += received;
+        }
+        if (total_recv < sent) {   // 接收异常退出时跳出外层循环
+            break;
+        }
     }
 
     // 循环结束回收资源

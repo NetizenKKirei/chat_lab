@@ -54,7 +54,7 @@ int main() {
     while (true) {
         ssize_t received = recv(client_fd, buffer, sizeof(buffer), 0);
         if (received == -1) {
-            std::perror("接收出错");
+            std::perror("接收错误");
             break;
         } else if (received == 0) {
             std::cout << "客户端发送结束，连接关闭" << std::endl;
@@ -63,6 +63,14 @@ int main() {
         std::cout << "收到" << received << "Byte(s): ";
         std::cout.write(buffer, received);
         std::cout << "\n";
+
+        // 回显消息
+        ssize_t sent = send(client_fd, buffer, received, MSG_NOSIGNAL);
+        if (sent == -1) {
+            std::perror("回显错误");
+            break;
+        }
+        std::cout << "本次发送: " << sent << "/" << received << " Byte(s)\n";
     }
 
     close(client_fd);
