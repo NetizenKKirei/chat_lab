@@ -4,8 +4,9 @@
 
 #include <cstdio>
 #include <iostream>
-#include <ostream>
 #include <string>
+
+#include "common/net.h"
 
 int main() {
     // 创建客户端socket
@@ -49,16 +50,15 @@ int main() {
             std::cout << "对话结束，再见！\n";
             break;
         }
-        ssize_t sent = send(socket_fd, line.data(), line.size(), MSG_NOSIGNAL);
-        if (sent == -1) {
-            std::perror("发送失败");
+
+        // 循环发送
+        if (!send_all(socket_fd, line.data(), line.size())) {
             break;
         }
-        std::cout << "本次发送: " << sent << "/" << line.size() << " Byte(s)\n";
 
         // 接收回显
-        long total_recv = 0;
-        while (total_recv < sent) {
+        unsigned long total_recv = 0;
+        while (total_recv < line.size()) {
             ssize_t received = recv(socket_fd, buffer, sizeof(buffer), 0);
             if (received == -1) {
                 std::perror("接收错误");
@@ -72,7 +72,7 @@ int main() {
             std::cout << "\n";
             total_recv += received;
         }
-        if (total_recv < sent) {   // 接收异常退出时跳出外层循环
+        if (total_recv < line.size()) {  // 接收异常退出时跳出外层循环
             break;
         }
     }

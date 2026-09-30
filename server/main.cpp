@@ -3,9 +3,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <iostream>
 #include <ostream>
+
+#include "common/net.h"
 
 int main() {
     // 创建服务器监听socket
@@ -64,13 +67,10 @@ int main() {
         std::cout.write(buffer, received);
         std::cout << "\n";
 
-        // 回显消息
-        ssize_t sent = send(client_fd, buffer, received, MSG_NOSIGNAL);
-        if (sent == -1) {
-            std::perror("回显错误");
+        // 回显
+        if (!send_all(client_fd, buffer, static_cast<std::size_t>(received))) {
             break;
         }
-        std::cout << "本次发送: " << sent << "/" << received << " Byte(s)\n";
     }
 
     close(client_fd);
