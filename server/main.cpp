@@ -7,8 +7,34 @@
 #include <cstdio>
 #include <iostream>
 #include <ostream>
+#include <thread>
+#include <cerrno>
+#include <system_error>
 
 #include "common/net.h"
+#include "common/protocol.h"
+
+// 单客户端处理
+void handle_client(int client_fd) {
+    // 消息接收循环
+    while (true) {
+        Message request;
+        if (!recv_message(client_fd, request)) {
+            break;
+        }
+        std::cout << "消息类型：" << static_cast<unsigned int>(request.type)
+                  << "\n消息内容: " << request.payload.dump() << "\n";
+
+        Message response;
+        response.type = MessageType::Response;
+        response.payload = {{"request", "broadcast"}, {"message", "消息接收成功"}};
+
+        if (!send_message(client_fd, response)) {
+            break;
+        }
+    }
+    close(client_fd);
+}
 
 int main() {
     // 创建服务器监听socket
@@ -42,39 +68,26 @@ int main() {
     }
     std::cout << "开始监听 127.0.0.1:9000" << std::endl;
 
-    // server连接逻辑
-    std::cout << "等待客户端连接……" << std::endl;
-    int client_fd = accept(server_fd, nullptr, nullptr);
-    if (client_fd == -1) {
-        std::perror("客户端连接失败");
-        close(server_fd);
-        return 1;
-    }
-    std::cout << "客户端已连接，文件描述符为：" << client_fd << std::endl;
-
-    // 消息接收循环
-    char buffer[1024];
+    // 循环accept客户端连接
     while (true) {
-        ssize_t received = recv(client_fd, buffer, sizeof(buffer), 0);
-        if (received == -1) {
-            std::perror("接收错误");
-            break;
-        } else if (received == 0) {
-            std::cout << "客户端发送结束，连接关闭" << std::endl;
+        std::cout << "等待客户端连接……" << std::endl;
+        int client_fd = accept(server_fd, nullptr, nullptr);
+        if (client_fd == -1) {
+            std::perror("接受连接失败");
             break;
         }
-        std::cout << "收到" << received << "Byte(s): ";
-        std::cout.write(buffer, received);
-        std::cout << "\n";
+        std::cout << "客户端已连接，文件描述符为：" << client_fd << std::endl;
 
-        // 回显
-        if (!send_all(client_fd, buffer, static_cast<std::size_t>(received))) {
-            break;
+        // 给连接的client创建线程
+        try {
+            std::thread worker(handle_client, client_fd);
+            worker.detach();
+        } catch (const std::system_error& error) {
+            std::cerr << "创建/分离线程失败：" << error.what() << '\n';
+            close(client_fd);
         }
     }
 
-    close(client_fd);
     close(server_fd);
-
     return 0;
 }

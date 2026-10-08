@@ -6,7 +6,7 @@
 #include <iostream>
 #include <string>
 
-#include "common/net.h"
+#include "common/protocol.h"
 
 int main() {
     // 创建客户端socket
@@ -33,8 +33,6 @@ int main() {
     }
     std::cout << "已连接服务器" << std::endl;
 
-    char buffer[4];  // 接收数组
-
     // 本地输入循环
     while (true) {
         std::string line;
@@ -51,30 +49,20 @@ int main() {
             break;
         }
 
-        // 循环发送
-        if (!send_all(socket_fd, line.data(), line.size())) {
+        // 发送请求
+        Message request;
+        request.type = MessageType::Broadcast;
+        request.payload = {{"text", line}};
+
+        if (!send_message(socket_fd, request)) {
             break;
         }
 
-        // 接收回显
-        unsigned long total_recv = 0;
-        while (total_recv < line.size()) {
-            ssize_t received = recv(socket_fd, buffer, sizeof(buffer), 0);
-            if (received == -1) {
-                std::perror("接收错误");
-                break;
-            } else if (received == 0) {
-                std::cout << "服务端发送结束，连接关闭" << std::endl;
-                break;
-            }
-            std::cout << "收到" << received << "Byte(s): ";
-            std::cout.write(buffer, received);
-            std::cout << "\n";
-            total_recv += received;
-        }
-        if (total_recv < line.size()) {  // 接收异常退出时跳出外层循环
+        Message response;
+        if (!recv_message(socket_fd, response)) {
             break;
         }
+        std::cout << "服务器响应：" << response.payload.dump() << '\n';
     }
 
     // 循环结束回收资源
