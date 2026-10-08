@@ -6,8 +6,20 @@
 #include <iostream>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
+#include <thread>
 
 #include "common/protocol.h"
+
+void receive_messages(int socket_fd) {
+    while (true) {
+        Message message;
+        if (!recv_message(socket_fd, message)) {
+            std::cout << "\n 服务器连接已结束\n";
+            break;
+        }
+        std::cout << "\n 收到消息：" << message.payload.dump() << std::endl;
+    }
+}
 
 int main() {
     // 创建客户端socket
@@ -33,6 +45,8 @@ int main() {
         return 1;
     }
     std::cout << "已连接服务器" << std::endl;
+
+    std::thread receiver(receive_messages, socket_fd);
 
     // 本地输入循环
     while (true) {
@@ -68,15 +82,11 @@ int main() {
         if (!send_message(socket_fd, request)) {
             break;
         }
-
-        Message response;
-        if (!recv_message(socket_fd, response)) {
-            break;
-        }
-        std::cout << "服务器响应：" << response.payload.dump() << '\n';
     }
 
     // 循环结束回收资源
+    shutdown(socket_fd, SHUT_RDWR);
+    receiver.join();
     close(socket_fd);
     return 0;
 }

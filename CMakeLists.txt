@@ -41,7 +41,10 @@ target_link_libraries(chat_core PUBLIC
   nlohmann_json::nlohmann_json
 )
 
-add_executable(chat_server server/main.cpp)
+add_executable(chat_server
+  server/main.cpp
+  server/session.cpp
+)
 target_link_libraries(chat_server PRIVATE chat_core)
 
 add_executable(chat_client client/main.cpp)

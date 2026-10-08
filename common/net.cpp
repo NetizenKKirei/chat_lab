@@ -27,7 +27,7 @@ bool send_all(int fd, const char* data, std::size_t length) {
             return false;
         }
         total_sent += static_cast<std::size_t>(sent);
-        std::cout << "累计发送: " << total_sent << "/" << length << " Byte(s)\n";
+        // std::cout << "累计发送: " << total_sent << "/" << length << " Byte(s)\n";
     }
     return true;
 }
@@ -48,7 +48,7 @@ bool recv_exact(int fd, char* data, std::size_t length) {
             return false;
         }
         total_received += static_cast<std::size_t>(received);
-        std::cout << "累计接收: " << total_received << "/" << length << " Byte(s)\n";
+        // std::cout << "累计接收: " << total_received << "/" << length << " Byte(s)\n";
     }
     return true;
 }
