@@ -13,7 +13,8 @@ enum class MessageType : std::uint8_t {
     Error = 6
 };
 
-inline constexpr std::size_t MAX_PAYLOAD_SIZE = std::size_t{4} * 1024 * 1024;
+inline constexpr std::size_t MAX_PAYLOAD_SIZE = std::size_t{4} * 1024 * 1024;  // 负载上限4MiB
+inline constexpr std::size_t MAX_TEXT_SIZE = std::size_t{1024} * 1024;         // 正文上限1MiB
 
 struct Message {
     MessageType type;

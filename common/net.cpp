@@ -44,7 +44,7 @@ bool recv_exact(int fd, char* data, std::size_t length) {
             std::perror("接收失败");
             return false;
         } else if (received == 0) {
-            std::cerr << "对方关闭连接\n";
+            std::cerr << "连接关闭\n";
             return false;
         }
         total_received += static_cast<std::size_t>(received);

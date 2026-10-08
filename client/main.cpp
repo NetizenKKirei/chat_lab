@@ -74,6 +74,9 @@ int main() {
         } else if (line == "/list") {
             request.type = MessageType::List;
             request.payload = nlohmann::json::object();
+        } else if (line.find("/all ") == 0) {
+            request.type = MessageType::Broadcast;
+            request.payload = {{"text", line.substr(5)}};
         } else {
             std::cout << "不支持该操作\n";
             continue;
