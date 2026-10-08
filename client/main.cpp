@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <iostream>
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 
 #include "common/protocol.h"
@@ -51,8 +52,18 @@ int main() {
 
         // 发送请求
         Message request;
-        request.type = MessageType::Broadcast;
-        request.payload = {{"text", line}};
+
+        // 识别请求类型
+        if (line.find("/login ") == 0) {
+            request.type = MessageType::Login;
+            request.payload = {{"username", line.substr(7)}};
+        } else if (line == "/list") {
+            request.type = MessageType::List;
+            request.payload = nlohmann::json::object();
+        } else {
+            std::cout << "不支持该操作\n";
+            continue;
+        }
 
         if (!send_message(socket_fd, request)) {
             break;
