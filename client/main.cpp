@@ -1,3 +1,4 @@
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -10,6 +11,7 @@
 
 #include "common/protocol.h"
 
+// 子线程函数：接收服务端消息
 void receive_messages(int socket_fd) {
     while (true) {
         Message message;
@@ -21,29 +23,67 @@ void receive_messages(int socket_fd) {
     }
 }
 
-int main() {
-    // 创建客户端socket
-    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_fd == -1) {
-        std::perror("socket 创建失败");
-        return 1;
+// 主机连接函数：解析主机地址并创建socket连接
+int connect_to_server(const std::string& host, const std::string& port) {
+    // 设置地址筛选条件
+    addrinfo hints{};
+    hints.ai_family = AF_INET;        // IPv4地址
+    hints.ai_socktype = SOCK_STREAM;  // 用于TCP字节流连接
+    hints.ai_flags = AI_NUMERICSERV;  // 数字形式端口
+
+    addrinfo* addresses = nullptr;
+
+    // 解析主机地址
+    int result = getaddrinfo(host.c_str(), port.c_str(), &hints, &addresses);
+    if (result != 0) {
+        std::cerr << "地址解析失败" << gai_strerror(result) << "\n";
+        return -1;
     }
-    std::cout << "创建成功！文件描述符为：" << socket_fd << std::endl;
 
-    // 设置服务器地址
-    sockaddr_in server_address{};
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(9000);
-    server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-    // 连接服务器
-    int connect_result = connect(socket_fd, reinterpret_cast<const sockaddr*>(&server_address),
-                                 sizeof(server_address));
-    if (connect_result == -1) {
+    // 遍历解析出的地址链表，尝试创建socket并连接
+    int socket_fd = -1;
+    for (addrinfo* current = addresses; current != nullptr; current = current->ai_next) {
+        int candidate = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+        if (candidate == -1) {
+            std::perror("创建socket失败");
+            continue;
+        }
+        if (connect(candidate, current->ai_addr, current->ai_addrlen) == 0) {
+            socket_fd = candidate;
+            break;
+        }
         std::perror("连接失败");
-        close(socket_fd);
+        close(candidate);
+    }
+
+    // 释放链表内存
+    freeaddrinfo(addresses);
+    return socket_fd;
+}
+
+int main(int argc, char* argv[]) {
+    // 设置启动参数
+    std::string host = "127.0.0.1";
+    std::string port = "9000";
+
+    if (argc >= 2) {
+        host = argv[1];
+    }
+    if (argc >= 3) {
+        port = argv[2];
+    }
+    if (argc > 3) {
+        std::cerr << "参数过多：" << argv[0] << " [主机名或IP] [端口]\n";
         return 1;
     }
+    std::cout << "目标服务器：" << host << ":" << port << '\n';
+
+    // 创建客户端socket
+    int socket_fd = connect_to_server(host, port);
+    if (socket_fd == -1) {
+        return 1;
+    }
+
     std::cout << "已连接服务器" << std::endl;
 
     std::thread receiver(receive_messages, socket_fd);

@@ -98,7 +98,7 @@ Message handle_list(const std::string& username) {
 }
 
 // 群聊函数
-Message handle_broadcast(const Message& request, const std::string username) {
+Message handle_broadcast(const Message& request, const std::string& username) {
     // 检查请求是否合法
     if (username.empty()) {
         return make_error("broadcast", ErrorCode::NotLoggedIn, "请先登录");

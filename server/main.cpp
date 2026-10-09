@@ -23,7 +23,7 @@ int main() {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(9000);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     int bind_result = bind(server_fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
     if (bind_result == -1) {
@@ -31,7 +31,7 @@ int main() {
         close(server_fd);
         return 1;
     }
-    std::cout << "绑定成功 127.0.0.1:9000" << std::endl;
+    std::cout << "绑定成功 0.0.0.0:9000" << std::endl;
 
     // server监听逻辑
     int listen_result = listen(server_fd, 7);
@@ -40,7 +40,7 @@ int main() {
         close(server_fd);
         return 1;
     }
-    std::cout << "开始监听 127.0.0.1:9000" << std::endl;
+    std::cout << "开始监听 0.0.0.0:9000" << std::endl;
 
     // 循环accept客户端连接
     while (true) {
