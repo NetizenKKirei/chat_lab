@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <iostream>
 #include <nlohmann/json_fwd.hpp>
@@ -117,6 +118,21 @@ int main(int argc, char* argv[]) {
         } else if (line.find("/all ") == 0) {
             request.type = MessageType::Broadcast;
             request.payload = {{"text", line.substr(5)}};
+        } else if (line.find("/to ") == 0) {
+            std::size_t separator = line.find(" ", 4);
+
+            if (separator == std::string::npos) {
+                std::cout << "请输入合法格式：/to [用户名] [正文]\n";
+                continue;
+            }
+            std::string receiver = line.substr(4, separator - 4);
+            std::string text = line.substr(separator + 1);
+            if (receiver.empty() || text.empty()) {
+                std::cout << "用户名和正文不能为空";
+                continue;
+            }
+            request.type = MessageType::Private;
+            request.payload = {{"to", receiver}, {"text", text}};
         } else {
             std::cout << "不支持该操作\n";
             continue;

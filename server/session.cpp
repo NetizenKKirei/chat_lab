@@ -15,8 +15,9 @@
 #include "common/protocol.h"
 #include "server/connection.h"
 
-std::unordered_map<std::string, std::shared_ptr<Connection>> online_users;  // 在线用户列表
-std::mutex users_mutex;                                                     // 线程加锁
+std::unordered_map<std::string, std::shared_ptr<Connection>>
+    online_users;        // 在线用户列表（用户名-连接对象键值对）
+std::mutex users_mutex;  // 线程加锁
 
 // 错误响应函数
 Message make_error(const std::string& request_name, const std::string& code,
@@ -115,11 +116,6 @@ Message handle_broadcast(const Message& request, const std::string& username) {
         return make_error("broadcast", ErrorCode::MessageTooLarge, "正文超过1MiB");
     }
 
-    // 准备要群发的消息
-    Message delivery;
-    delivery.type = MessageType::Broadcast;
-    delivery.payload = {{"from", username}, {"text", text}};
-
     // 加锁获取群发列表(在线connection的智能指针)
     std::vector<std::shared_ptr<Connection>> targets;
     {
@@ -133,6 +129,11 @@ Message handle_broadcast(const Message& request, const std::string& username) {
     if (targets.empty()) {
         return make_error("broadcast", ErrorCode::DeliveryFailed, "当前无其他在线用户");
     }
+
+    // 准备要群发的消息
+    Message delivery;
+    delivery.type = MessageType::Broadcast;
+    delivery.payload = {{"from", username}, {"text", text}};
 
     // 发送消息
     bool failed = false;
@@ -153,6 +154,60 @@ Message handle_broadcast(const Message& request, const std::string& username) {
     return response;
 }
 
+// 私聊函数
+Message handle_private(const Message& request, const std::string& username) {
+    // 检查请求是否合法
+    if (username.empty()) {
+        return make_error("private", ErrorCode::NotLoggedIn, "请先登录");
+    }
+    if (!request.payload.contains("to") || !request.payload["to"].is_string() ||
+        !request.payload.contains("text") || !request.payload["text"].is_string()) {
+        return make_error("private", ErrorCode::InvalidArgument, "to/text必须为字符串");
+    }
+
+    std::string receiver = request.payload["to"].get<std::string>();
+    std::string text = request.payload["text"].get<std::string>();
+
+    if (!valid_username(receiver)) {
+        return make_error("private", ErrorCode::InvalidArgument, "用户名不合法");
+    }
+    if (text.empty()) {
+        return make_error("private", ErrorCode::InvalidArgument, "正文不能为空");
+    }
+    if (text.size() > MAX_TEXT_SIZE) {
+        return make_error("private", ErrorCode::MessageTooLarge, "正文超过1MiB");
+    }
+
+    // 加锁查询私聊对象(在线connection的智能指针)
+    std::shared_ptr<Connection> target;
+    {
+        std::lock_guard<std::mutex> lock(users_mutex);
+        auto it = online_users.find(receiver);
+        if (it != online_users.end()) {
+            target = it->second;
+        }
+    }
+    if (!target) {
+        return make_error("private", ErrorCode::DeliveryFailed, "目标用户不在线");
+    }
+
+    // 准备要私发的消息
+    Message delivery;
+    delivery.type = MessageType::Private;
+    delivery.payload = {{"from", username}, {"text", text}};
+
+    // 发送消息
+    if (!target->send(delivery)) {
+        ::shutdown(target->fd, SHUT_RDWR);
+        return make_error("private", ErrorCode::DeliveryFailed, "私聊发送失败");
+    }
+
+    Message response;
+    response.type = MessageType::Response;
+    response.payload = {{"request", "private"}};
+    return response;
+}
+
 // 单客户端处理
 void handle_client(int client_fd) {
     auto connection = std::make_shared<Connection>(
@@ -168,6 +223,7 @@ void handle_client(int client_fd) {
         std::cout << "消息类型：" << static_cast<unsigned int>(request.type)
                   << "\n消息内容: " << request.payload.dump() << "\n";
 
+        // 分类型处理消息
         Message response;
         if (request.type == MessageType::Login) {
             response = handle_login(request, username, connection);
@@ -175,6 +231,8 @@ void handle_client(int client_fd) {
             response = handle_list(username);
         } else if (request.type == MessageType::Broadcast) {
             response = handle_broadcast(request, username);
+        } else if (request.type == MessageType::Private) {
+            response = handle_private(request, username);
         } else {
             response.type = MessageType::Error;
             response.payload = {{"request", "unknown"},
