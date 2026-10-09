@@ -16,8 +16,13 @@
 void receive_messages(int socket_fd) {
     while (true) {
         Message message;
-        if (!recv_message(socket_fd, message)) {
-            std::cout << "\n 服务器连接已结束\n";
+        MessageStatus status = recv_message(socket_fd, message);
+        if (status == MessageStatus::Rejected) {
+            std::cerr << "收到消息格式不合法，已忽略\n";
+            continue;
+        }
+        if (status == MessageStatus::Close) {
+            std::cout << "连接中断!\n";
             break;
         }
         std::cout << "\n 收到消息：" << message.payload.dump() << std::endl;
@@ -104,6 +109,7 @@ int main(int argc, char* argv[]) {
             std::cout << "对话结束，再见！\n";
             break;
         }
+    
 
         // 发送请求
         Message request;
@@ -138,7 +144,13 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        if (!send_message(socket_fd, request)) {
+        MessageStatus status = send_message(socket_fd, request);
+        if (status == MessageStatus::Rejected) {
+            std::cerr << "消息发送被拒，请重试\n";
+            continue;
+        }
+        if (status == MessageStatus::Close) {
+            std::cout << "连接中断!\n";
             break;
         }
     }

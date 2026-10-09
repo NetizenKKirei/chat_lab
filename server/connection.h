@@ -16,7 +16,7 @@ struct Connection {
     Connection(const Connection&) = delete;             // 禁止拷贝构造
     Connection& operator=(const Connection&) = delete;  // 禁止拷贝赋值
 
-    bool send(const Message& message) {
+    MessageStatus send(const Message& message) {
         std::lock_guard<std::mutex> lock(send_mutex);  // 对象的发送锁
         return send_message(fd, message);
     }

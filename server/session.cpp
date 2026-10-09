@@ -138,9 +138,12 @@ Message handle_broadcast(const Message& request, const std::string& username) {
     // 发送消息
     bool failed = false;
     for (const auto& target : targets) {
-        if (!target->send(delivery)) {
+        MessageStatus status = target->send(delivery);
+        if (status != MessageStatus::Success) {
+            if (status == MessageStatus::Close) {
+                ::shutdown(target->fd, SHUT_RDWR);
+            }
             failed = true;
-            ::shutdown(target->fd, SHUT_RDWR);
         }
     }
 
@@ -188,7 +191,7 @@ Message handle_private(const Message& request, const std::string& username) {
         }
     }
     if (!target) {
-        return make_error("private", ErrorCode::DeliveryFailed, "目标用户不在线");
+        return make_error("private", ErrorCode::UserOffline, "目标用户不在线");
     }
 
     // 准备要私发的消息
@@ -197,8 +200,12 @@ Message handle_private(const Message& request, const std::string& username) {
     delivery.payload = {{"from", username}, {"text", text}};
 
     // 发送消息
-    if (!target->send(delivery)) {
-        ::shutdown(target->fd, SHUT_RDWR);
+    MessageStatus status = target->send(delivery);
+
+    if (status != MessageStatus::Success) {
+        if (status == MessageStatus::Close) {
+            ::shutdown(target->fd, SHUT_RDWR);
+        }
         return make_error("private", ErrorCode::DeliveryFailed, "私聊发送失败");
     }
 
@@ -217,8 +224,18 @@ void handle_client(int client_fd) {
     // 消息接收循环
     while (true) {
         Message request;
-        if (!recv_message(connection->fd, request)) {
+        // 判断接收状态
+        MessageStatus status = recv_message(connection->fd, request);
+        if (status == MessageStatus::Close) {
             break;
+        }
+        if (status == MessageStatus::Rejected) {
+            Message error = make_error("unknown", ErrorCode::InvalidJson, "负载不合法或解析失败");
+            if (connection->send(error) != MessageStatus::Success) {
+                std::cerr << "服务器响应失败\n";
+                break;
+            }
+            continue;
         }
         std::cout << "消息类型：" << static_cast<unsigned int>(request.type)
                   << "\n消息内容: " << request.payload.dump() << "\n";
@@ -239,7 +256,8 @@ void handle_client(int client_fd) {
                                 {"code", ErrorCode::UnexpectedType},
                                 {"message", "该请求暂未实现"}};
         }
-        if (!connection->send(response)) {
+        if (connection->send(response) != MessageStatus::Success) {
+            std::cerr << "服务器响应失败\n";
             break;
         }
     }
