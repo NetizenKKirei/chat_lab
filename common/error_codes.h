@@ -1,6 +1,6 @@
 #pragma once
 
-// 错误码是协议中的字符串值；修改名称时应保持线上字符串稳定。
+// 错误码定义
 namespace ErrorCode {
 
 // 协议与格式错误
