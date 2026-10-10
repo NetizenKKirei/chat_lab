@@ -8,16 +8,17 @@
 #include <system_error>
 #include <thread>
 
+#include "common/unique_fd.h"
 #include "server/session.h"
 
 int main() {
     // 创建服务器监听socket
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
+    UniqueFd server_fd(socket(AF_INET, SOCK_STREAM, 0));
+    if (server_fd.get() == -1) {
         std::perror("socket 创建失败");
         return 1;
     }
-    std::cout << "创建成功！文件描述符为：" << server_fd << std::endl;
+    std::cout << "创建成功！文件描述符为：" << server_fd.get() << std::endl;
 
     // 设置监听socket地址并绑定
     sockaddr_in address{};
@@ -25,19 +26,18 @@ int main() {
     address.sin_port = htons(9000);
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    int bind_result = bind(server_fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+    int bind_result =
+        bind(server_fd.get(), reinterpret_cast<const sockaddr*>(&address), sizeof(address));
     if (bind_result == -1) {
         std::perror("bind 失败");
-        close(server_fd);
         return 1;
     }
     std::cout << "绑定成功 0.0.0.0:9000" << std::endl;
 
     // server监听逻辑
-    int listen_result = listen(server_fd, 7);
+    int listen_result = listen(server_fd.get(), 7);
     if (listen_result == -1) {
         std::perror("监听失败");
-        close(server_fd);
         return 1;
     }
     std::cout << "开始监听 0.0.0.0:9000" << std::endl;
@@ -45,7 +45,7 @@ int main() {
     // 循环accept客户端连接
     while (true) {
         std::cout << "等待客户端连接……" << std::endl;
-        int client_fd = accept(server_fd, nullptr, nullptr);
+        int client_fd = accept(server_fd.get(), nullptr, nullptr);
         if (client_fd == -1) {
             if (errno == EINTR) {
                 continue;
@@ -65,6 +65,5 @@ int main() {
         }
     }
 
-    close(server_fd);
     return 0;
 }

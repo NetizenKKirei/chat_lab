@@ -11,7 +11,11 @@ struct Connection {
     explicit Connection(int socket_fd) : fd(socket_fd) {}  // 构造函数
 
     // 析构函数，对象销毁自动关闭socket
-    ~Connection() { close(fd); }
+    ~Connection() {
+        if (fd != -1) {
+            close(fd);
+        }
+    }
 
     Connection(const Connection&) = delete;             // 禁止拷贝构造
     Connection& operator=(const Connection&) = delete;  // 禁止拷贝赋值

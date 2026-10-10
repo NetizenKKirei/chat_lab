@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "common/protocol.h"
+#include "common/unique_fd.h"
 
 // 子线程函数：接收服务端消息
 void receive_messages(int socket_fd) {
@@ -27,6 +28,7 @@ void receive_messages(int socket_fd) {
         }
         std::cout << "\n 收到消息：" << message.payload.dump() << std::endl;
     }
+    shutdown(socket_fd, SHUT_RDWR);  // 回收资源
 }
 
 // 主机连接函数：解析主机地址并创建socket连接
@@ -84,15 +86,15 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "目标服务器：" << host << ":" << port << '\n';
 
-    // 创建客户端socket
-    int socket_fd = connect_to_server(host, port);
-    if (socket_fd == -1) {
+    // 创建客户端socket并连接服务器
+    UniqueFd socket_fd(connect_to_server(host, port));
+    if (socket_fd.get() == -1) {
         return 1;
     }
-
     std::cout << "已连接服务器" << std::endl;
 
-    std::thread receiver(receive_messages, socket_fd);
+    // 创建接收线程
+    std::thread receiver(receive_messages, socket_fd.get());
 
     // 本地输入循环
     while (true) {
@@ -109,7 +111,6 @@ int main(int argc, char* argv[]) {
             std::cout << "对话结束，再见！\n";
             break;
         }
-    
 
         // 发送请求
         Message request;
@@ -144,7 +145,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        MessageStatus status = send_message(socket_fd, request);
+        MessageStatus status = send_message(socket_fd.get(), request);
         if (status == MessageStatus::Rejected) {
             std::cerr << "消息发送被拒，请重试\n";
             continue;
@@ -155,9 +156,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // 循环结束回收资源
-    shutdown(socket_fd, SHUT_RDWR);
+    // 循环结束停止收发
+    shutdown(socket_fd.get(), SHUT_RDWR);
     receiver.join();
-    close(socket_fd);
     return 0;
 }
