@@ -28,6 +28,7 @@
 | `common/net.h`、`common/net.cpp` | 循环收发指定数量的字节，处理部分读写及信号中断 |
 | `common/protocol.h`、`common/protocol.cpp` | 定义消息对象，编码和解析协议帧 |
 | `common/error_codes.h` | 集中定义错误码字符串 |
+| `common/unique_fd.h` | 独占持有 fd，析构时自动回收fd资源 |
 | `server/main.cpp` | 创建监听 socket、接受连接、启动工作线程 |
 | `server/session.h`、`server/session.cpp` | 业务处理：登录、在线列表、群聊、私聊、请求分发及连接结束后的用户清理 |
 | `server/connection.h` | 管理通信fd生命周期和帧发送锁 |
@@ -93,15 +94,20 @@
 
 #### 2.4 连接结束与资源清理
 
-`handle_client` 通过 `make_shared` 创建连接对象，登录成功后在线表持有同一对象。复制共享指针不会复制 socket 或锁。连接对象禁止拷贝，最后一个共享持有者释放它时，析构函数调用 `close` 释放服务端本地 socket 资源。
+socket 通过 RAII 对象管理，两个类均禁止拷贝：
 
-接收返回 `Close` 或响应发送未成功时，处理线程在锁内查找自己的用户名，并确认对应值仍是当前连接，再删除条目。随后调用 `shutdown` 停止收发。处理函数不手动关闭连接描述符，避免其他共享持有者使用期间描述符被释放并复用。
+| 管理类 | 数据成员 | 使用方式与释放 |
+| --- | --- | --- |
+| `UniqueFd` | `int fd_` | 管理服务端监听 socket 和客户端 socket；构造时接管 fd，`get()` 提供描述符供使用，析构时对有效 fd 调用 `close` |
+| `Connection` | `int fd`、`std::mutex send_mutex` | 管理服务端通信 socket；`send()` 加锁发送完整帧，通过 `shared_ptr` 由处理线程、在线表和投递方共享，最后一个持有者释放后析构并调用 `close` |
 
-客户端的 `/quit` 在本地结束输入循环，不发送协议退出消息。收尾按 `shutdown → receiver.join → close` 执行：停止收发，等待接收线程退出，再释放描述符。终端输入结束或发送返回 `Close` 也进入这一收尾流程；发送返回 `Rejected` 则继续输入。
+清理流程：
 
-客户端接收线程遇到 `Close` 时提示并退出该线程；这不会自动中断主线程中的 `getline`。最终清理由主线程退出输入循环后执行。
+- **服务端通信连接**：结束处理循环 → 加锁确认用户名仍对应当前连接并移出在线表 → `shutdown` 停止收发 → 最后一个共享指针释放时自动 `close`。
+- **客户端**：主线程结束输入循环 → `shutdown` → `receiver.join()` → `UniqueFd` 析构关闭 fd。接收线程遇到 `Close` 也会执行 `shutdown` 后退出，但不会中断主线程的 `getline`。
+- **服务端监听 socket**：`main()` 中的 `UniqueFd` 销毁时自动关闭。
 
-两端的 socket 分别属于各自进程。一端关闭连接后，另一端通过收发结果获知连接状态，仍需要释放自己的 socket。服务端通信连接的清理不关闭主线程的监听 socket。
+`shutdown` 负责停止收发，由调用者显式执行；析构函数中的 `close` 负责释放描述符。
 
 ### 3. 请求分发
 
@@ -143,6 +149,6 @@
 
 #### 4.5 共用错误响应（Error）
 
-错误码常量集中放在 `common/error_codes.h`，业务代码使用常量名称，JSON 中发送其字符串值。`make_error` 将请求名称、错误码和说明组装成 `Message`，由连接处理函数统一发送。具体错误码和字段含义见 [通信协议的错误响应](protocol.md#6-错误响应与断开规则)。
+错误码常量集中放在 `common/error_codes.h`，业务代码使用常量名称，JSON 中发送其字符串值。`make_error` 将请求名称、错误码和说明组装成 `Message`，由连接处理函数统一发送。具体错误码和字段含义见 [通信协议的错误响应](protocol.md#6-错误响应与中断规则)。
 
 业务错误响应发送成功后继续接收请求；协议层根据错误发生阶段返回 `Rejected` 或 `Close`，由调用者决定继续处理还是清理连接。系统 `errno` 用于本地诊断，不直接作为业务错误码传输。
