@@ -4,16 +4,21 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/error_codes.h"
 #include "common/protocol.h"
 #include "server/connection.h"
+#include "server/test_session.h"
 
 std::unordered_map<std::string, std::shared_ptr<Connection>>
     online_users;        // 在线用户列表（用户名-连接对象键值对）
@@ -215,11 +220,13 @@ Message handle_private(const Message& request, const std::string& username) {
     return response;
 }
 
+
 // 单客户端处理
 void handle_client(int client_fd) {
     auto connection = std::make_shared<Connection>(
         client_fd);  // 创建Connection对象，传入client_fd给构造函数并返回共享智能指针
     std::string username;
+    ServerTestState test_state;
 
     // 消息接收循环
     while (true) {
@@ -230,6 +237,10 @@ void handle_client(int client_fd) {
             break;
         }
         if (status == MessageStatus::Rejected) {
+            if (test_state.active) {
+                ++test_state.data_errors;
+                continue;
+            }
             Message error = make_error("unknown", ErrorCode::InvalidJson, "负载不合法或解析失败");
             if (connection->send(error) != MessageStatus::Success) {
                 std::cerr << "服务器响应失败\n";
@@ -237,8 +248,11 @@ void handle_client(int client_fd) {
             }
             continue;
         }
-        std::cout << "消息类型：" << static_cast<unsigned int>(request.type)
-                  << "\n消息内容: " << request.payload.dump() << "\n";
+        // 不打印压力测试消息
+        if (request.type != MessageType::Test) {
+            std::cout << "消息类型：" << static_cast<unsigned int>(request.type)
+                      << "\n消息内容: " << request.payload.dump() << "\n";
+        }
 
         // 分类型处理消息
         Message response;
@@ -250,6 +264,10 @@ void handle_client(int client_fd) {
             response = handle_broadcast(request, username);
         } else if (request.type == MessageType::Private) {
             response = handle_private(request, username);
+        } else if (request.type == MessageType::Test) {
+            response = handle_test(request, test_state);
+        } else if (request.type == MessageType::TestControl) {
+            response = handle_test_control(request, test_state);
         } else {
             response.type = MessageType::Error;
             response.payload = {{"request", "unknown"},
@@ -260,6 +278,13 @@ void handle_client(int client_fd) {
             std::cerr << "服务器响应失败\n";
             break;
         }
+    }
+    // 测试：没有收到end就退出循环，说明本轮测试中断。
+    if (test_state.active) {
+        test_state.ended_at = std::chrono::steady_clock::now();
+        test_state.active = false;
+        std::cout << "[server] 测试中断\n";
+        print_test_stats(test_state);
     }
     // 客户端关闭前释放用户名
     if (!username.empty()) {

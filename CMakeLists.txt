@@ -44,6 +44,7 @@ target_link_libraries(chat_core PUBLIC
 add_executable(chat_server
   server/main.cpp
   server/session.cpp
+  server/test_session.cpp
 )
 target_link_libraries(chat_server PRIVATE chat_core)
 
@@ -51,6 +52,4 @@ add_executable(chat_client client/main.cpp)
 target_link_libraries(chat_client PRIVATE chat_core)
 
 enable_testing()
-add_executable(protocol_test tests/protocol_test.cpp)
-target_link_libraries(protocol_test PRIVATE chat_core)
-add_test(NAME protocol_test COMMAND protocol_test)
+add_subdirectory(tests)

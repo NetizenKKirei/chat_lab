@@ -36,6 +36,8 @@
 | 4 | `Private` | `{"to":"bob","text":"你好"}` | 向目标用户投递讯息 |
 | 5 | `Response` | 不允许作为客户端请求 | 服务端返回成功响应 |
 | 6 | `Error` | 不允许作为客户端请求 | 服务端返回错误响应 |
+| 7 | `Test` | `{"sequence":0,"data":"xxx"}` | 测试已启动时统计并回传，数据异常计数后继续 |
+| 8 | `TestControl` | `phase`、`run_id`；start另含`message_count`和`data_bytes` | 开始/结束本轮测试，回复start_ack/end_ack |
 
 服务端响应格式：
 
@@ -47,9 +49,10 @@
 | `Response` | 私聊处理成功 | `{"request":"private"}` |
 | `Broadcast` | 发送群聊 | `{"from":"alice","text":"大家好"}` |
 | `Private` | 发送私聊 | `{"from":"alice","text":"你好"}` |
+| `Test` | 测试回显 | `{"sequence":1,"data":"..."}` |
 | `Error` | 操作失败 | `{"request":"private","code":"USER_OFFLINE","message":"目标用户不在线"}` |
 
-客户端发送类型 1～4；服务端发送响应类型 5、6，以及群聊、私聊投递类型 3、4。客户端收到的消息可能是业务响应，也可能是其他用户的聊天投递。
+客户端发送类型1～4、7和8；服务端发送响应类型5、6，聊天投递类型3、4，以及测试类型7、8。
 
 ## 4. 请求字段与行为
 
@@ -59,10 +62,28 @@
 | `List` | 无，使用 `{}` | 必须登录；返回包含自己的在线名单，按用户名排序 |
 | `Broadcast` | `text`：字符串 | 必须登录；正文非空；发给查询目标时在线的其他用户，不回发给发送者 |
 | `Private` | `to`、`text`：字符串 | 必须登录；目标名满足用户名格式；正文非空；仅向目标投递，允许目标是自己 |
+| `Test` | `sequence`：非负整数，`data`：字符串 | 不要求登录，但必须先start；检查序号、约定长度和固定字符x，统计后原样回传 |
+| `TestControl` | `phase`：字符串，`run_id`：非负整数 | start要求正整数message_count与1字节～1 MiB的data_bytes；end匹配活动轮次 |
 
 正文允许空白文字和空格，长度按 UTF-8 字节数计算。服务端根据连接的登录身份生成投递中的 `from`，不采用客户端自行声明的发送者。额外 JSON 字段不参与当前业务处理。
 
 群聊和私聊的发送者收到成功响应或错误响应。群聊没有其他在线用户或部分目标发送失败时返回 `DELIVERY_FAILED`，发送成功的消息不撤回；私聊目标不在线时返回 `USER_OFFLINE`。成功响应表示发送处理成功，不代表目标已经阅读。
+
+`Test` 必须满足JSON协议负载4 MiB上限；start约定的data长度最多1 MiB。
+实际数据与约定不符时记录错误，仍回传可解码的Test。
+回传保证JSON值等价，不保证原有空白和字段排版。
+
+控制流程如下，服务端统计只在本地输出，不包含在确认消息中：
+
+```text
+start:     {"phase":"start","run_id":0,"message_count":100,"data_bytes":1048576}
+start_ack: {"phase":"start_ack","run_id":0}
+end:       {"phase":"end","run_id":0}
+end_ack:   {"phase":"end_ack","run_id":0}
+```
+
+服务端逐条同步回显，end_ack在此前所有回显之后发送。详细统计口径见
+[压力测试说明](../tests/pressure_test.md)。
 
 连接结束后释放用户名。`/quit` 是客户端本地命令，不对应额外的协议消息。
 
@@ -72,6 +93,7 @@
 | --- | --- | --- |
 | 协议负载 | 4MiB | JSON 编码后的字节数；发送端检查上限，超限则本地拒绝发送；接收端检查零长度和超限，非法则返回 `Close` |
 | 聊天正文 | 1MiB | 解析后的 `text` 字节数；超限返回 `MESSAGE_TOO_LARGE`，不投递，连接可继续使用 |
+| 测试约定 | 1MiB | start中data_bytes的上限；实际Test长度不符计数据错误，整帧仍受4MiB限制 |
 
 等于上限时允许通过长度检查。JSON 字段和转义会增加编码长度，因此必须同时满足两层限制。发送端也检查协议负载上限，超限时本地报错，不发送该帧；客户端保留连接，允许重新输入。4 MiB 只限制 JSON 负载，8 字节头部大小固定，因此单帧总长度最多为 4 MiB + 8 字节。
 
@@ -86,7 +108,7 @@
 | 错误码 | 触发条件 | request |
 | --- | --- | --- |
 | `ALREADY_LOGGED_IN` | 当前连接重复登录 | `login` |
-| `INVALID_ARGUMENT` | 字段缺失、字段类型错误、用户名格式非法或正文为空 | `login`、`broadcast`、`private` |
+| `INVALID_ARGUMENT` | 字段不合法，或测试控制参数、阶段不合法 | `login`、`broadcast`、`private`、`test`、`test_control` |
 | `USERNAME_TAKEN` | 登录名称已被占用 | `login` |
 | `NOT_LOGGED_IN` | 未登录就查询列表或聊天 | `list`、`broadcast`、`private` |
 | `MESSAGE_TOO_LARGE` | 正文超过 1 MiB | `broadcast`、`private` |
@@ -103,7 +125,10 @@
 | `Rejected` | 发送前发现负载非对象、JSON 编码失败或超过 4 MiB；或已完整接收负载，但 JSON 无效或非对象 | 拒绝本条消息，连接可以继续使用 |
 | `Close` | 头部魔数、版本、类型编号非法；接收时声明长度为零或超过 4 MiB；底层收发失败或 EOF | 结束该连接的处理，由调用者清理资源，不保证返回 `Error` |
 
-服务端接收返回 `Rejected` 时，发送 `code: "INVALID_JSON"`、`request: "unknown"` 的错误响应，发送成功后继续接收；客户端接收返回 `Rejected` 时提示并忽略，发送返回 `Rejected` 时允许重新输入。
+服务端非测试期间接收返回Rejected时发送INVALID_JSON错误响应并继续。
+测试期间接收返回Rejected时只增加data_errors并继续，不发送Error；
+压力客户端接收Rejected也计入data_errors。交互客户端接收Rejected时提示并忽略，
+发送Rejected时允许重新输入。
 
 服务端接收返回 `Close` 后结束该连接的处理并清理资源。客户端发送返回 `Close` 时，主线程退出输入循环并执行收尾；接收返回 `Close` 时，接收线程退出接收循环并调用 `shutdown`，但不会自动结束主线程的输入等待。客户端最终由主线程等待接收线程退出，再通过 `UniqueFd` 释放 socket，详见 [设计说明](design.md)。
 

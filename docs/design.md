@@ -32,6 +32,8 @@
 | `server/main.cpp` | 创建监听 socket、接受连接、启动工作线程 |
 | `server/session.h`、`server/session.cpp` | 业务处理：登录、在线列表、群聊、私聊、请求分发及连接结束后的用户清理 |
 | `server/connection.h` | 管理通信fd生命周期和帧发送锁 |
+| `server/test_session.h`、`server/test_session.cpp` | session内压力测试状态、开始/结束控制、回显和本地统计 |
+| `tests/pressure_test.cpp` | 压力客户端：先大消息后小消息，每轮独立连接 |
 | `client/main.cpp` | 解析终端命令、发送请求、独立接收并显示消息 |
 
 #### 1.2 网络与并发模型
@@ -90,7 +92,7 @@
 
 这些枚举值只作为 C++ 函数返回值，不写入消息头或 JSON，也不替代线上 `Error` 消息。`send_message` 和 `recv_message` 本身不调用 `close`。
 
-服务端接收返回 `Rejected` 时，发送 `INVALID_JSON` 错误并继续；客户端接收返回 `Rejected` 时，提示并忽略。客户端发送返回 `Rejected` 时允许重新输入。服务端发送自己构造的业务响应或错误响应时，任何非 `Success` 结果都会结束当前连接处理；群聊、私聊的目标投递则分别处理 `Rejected` 与 `Close`。
+非测试期间，服务端接收Rejected时发送INVALID_JSON并继续；压力测试期间只累计data_errors并继续。交互客户端接收Rejected时提示并忽略，发送Rejected时允许重新输入。服务端发送响应失败则结束当前连接；群聊、私聊的目标投递分别处理Rejected与Close。压力测试的完整规则见[测试说明](../tests/pressure_test.md)。
 
 #### 2.4 连接结束与资源清理
 

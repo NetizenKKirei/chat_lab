@@ -44,7 +44,7 @@ MessageStatus send_message(int fd, const Message& message) {
         };
         return MessageStatus::Success;
     } catch (const nlohmann::json::exception& error) {
-        std::cerr << "消息JSON编码失败: " << error.what() << '\n';
+        std::cerr << "JSON序列化失败: " << error.what() << '\n';
         return MessageStatus::Rejected;
     }
 }
@@ -74,6 +74,8 @@ MessageStatus recv_message(int fd, Message& message) {
         case MessageType::Private:
         case MessageType::Response:
         case MessageType::Error:
+        case MessageType::Test:
+        case MessageType::TestControl:
             break;
         default:
             std::cerr << "未知消息类型\n";
@@ -86,8 +88,7 @@ MessageStatus recv_message(int fd, Message& message) {
     std::uint32_t length = ntohl(body_length);
     if (length == 0 || length > MAX_PAYLOAD_SIZE) {
         std::cerr << "负载长度不合法\n";
-        return MessageStatus::
-            Close;  // 程序内客户端发送前会检查负载长度，这里接收函数检查，检测到绕过检查的非标准客户端直接断开连接
+        return MessageStatus::Close;
     }
 
     // 读取body
@@ -107,7 +108,7 @@ MessageStatus recv_message(int fd, Message& message) {
         message.payload = payload;
         return MessageStatus::Success;
     } catch (const nlohmann::json::exception& error) {
-        std::cerr << "消息JSON解析失败：" << error.what() << '\n';
+        std::cerr << "JSON解析失败：" << error.what() << '\n';
         return MessageStatus::Rejected;
     }
 }

@@ -21,7 +21,7 @@ struct Connection {
     Connection& operator=(const Connection&) = delete;  // 禁止拷贝赋值
 
     MessageStatus send(const Message& message) {
-        std::lock_guard<std::mutex> lock(send_mutex);  // 对象的发送锁
+        std::lock_guard<std::mutex> lock(send_mutex);  // 对象发送锁
         return send_message(fd, message);
     }
 

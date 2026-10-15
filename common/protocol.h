@@ -11,7 +11,9 @@ enum class MessageType : std::uint8_t {
     Broadcast = 3,
     Private = 4,
     Response = 5,
-    Error = 6
+    Error = 6,
+    Test = 7,
+    TestControl = 8
 };
 
 inline constexpr std::size_t MAX_PAYLOAD_SIZE = std::size_t{4} * 1024 * 1024;  // 负载上限4MiB

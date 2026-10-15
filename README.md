@@ -4,6 +4,32 @@
 
 - [通信协议](docs/protocol.md)：帧格式、消息字段、长度限制和错误码。
 - [设计说明](docs/design.md)：模块分工、线程、锁和资源管理。
+- [压力测试](tests/pressure_test.md)：大小消息两轮测试、限速和统计口径。
+
+## 项目目录
+
+```text
+common/                 共用TCP收发、帧协议、错误码和fd管理
+server/
+  main.cpp              监听和接受连接
+  session.cpp           聊天业务、消息分发及连接清理
+  test_session.h/.cpp   服务端压力测试状态、回显和统计
+  connection.h          连接生命周期及发送锁
+client/main.cpp         交互式聊天客户端
+tests/
+  CMakeLists.txt        测试目标构建配置
+  protocol_test.cpp     协议测试占位程序，尚无实际断言
+  pressure_test.cpp     非交互式压力客户端
+  pressure_test.md      当前压力测试说明
+  指标.md               历史指标规划，含未实现功能
+docs/                   协议和设计文档
+scripts/                启动辅助脚本
+docker/                 开发容器镜像
+build/                  本地Debug产物（Git忽略）
+build-release/          本地Release产物（Git忽略）
+```
+
+根目录CMake管理公共库和应用，tests/CMakeLists.txt管理测试目标。
 
 ## 1. 环境与编译
 
@@ -18,10 +44,31 @@ sudo apt install -y build-essential clang cmake ninja-build libssl-dev nlohmann-
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=clang++
-cmake --build build
+cmake --build build --parallel 1
 ```
 
-生成 `build/chat_server` 和 `build/chat_client`。修改源码后重新编译，并重启相应程序。
+生成 `build/chat_server`、`build/chat_client`、`build/pressure_test` 和 `build/protocol_test`。修改源码后重新编译，并重启相应程序。
+
+性能测试使用独立Release目录：
+
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release --parallel 1
+```
+
+启动 `./build-release/chat_server`，另一个终端运行：
+
+```bash
+./build-release/pressure_test 10 127.0.0.1 9000
+```
+
+目标为10 MiB/s，依次运行1 MiB和1 KiB消息两轮，各自输出结果。
+两端应使用同一构建配置；吞吐包含JSON编解码等应用处理开销。
+本机内存有限，构建必须使用 `--parallel 1`，且不能同时构建Debug和Release，
+也不要将构建与压力测试并发运行。
+
+`ctest --test-dir build --output-on-failure` 可运行已注册测试，但目前
+`protocol_test.cpp` 只有占位代码，不能据其通过判断协议已充分验证。
 
 ## 2. 启动服务端与本机客户端
 
