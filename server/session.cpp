@@ -239,6 +239,7 @@ void handle_client(int client_fd) {
         if (status == MessageStatus::Rejected) {
             if (test_state.active) {
                 ++test_state.data_errors;
+                report_test_progress(test_state);
                 continue;
             }
             Message error = make_error("unknown", ErrorCode::InvalidJson, "负载不合法或解析失败");

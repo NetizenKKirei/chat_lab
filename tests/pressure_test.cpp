@@ -25,6 +25,12 @@ struct TestRunState {
     std::mutex mutex;
     std::condition_variable changed;
 
+    // 发送线程逐条更新，接收线程每个打印周期读取并清零。
+    std::mutex send_period_mutex;
+    std::uint64_t period_send_samples = 0;
+    std::uint64_t period_send_nanoseconds = 0;
+    std::uint64_t period_send_max_nanoseconds = 0;
+
     ClientPhase phase = ClientPhase::WaitingStartAck;
     std::string error;
 
@@ -36,11 +42,12 @@ struct TestRunState {
     std::uint64_t sent_messages = 0;
     std::uint64_t rejected_messages = 0;
     double send_seconds = 0;
+    double drain_seconds = 0;
+    std::chrono::steady_clock::time_point send_ended_at;
 
     std::uint64_t received_messages = 0;
     std::uint64_t received_bytes = 0;
     std::uint64_t next_expected_sequence = 0;
-    std::uint64_t sequence_errors = 0;
     std::uint64_t data_errors = 0;
 
     std::chrono::steady_clock::time_point started_at;
@@ -53,38 +60,38 @@ struct TestRunState {
 
 // 统计输出函数：接收线程结束后调用，或调用者持有state.mutex。
 void print_test_stats(const TestRunState& state) {
-    std::cout << "[client]\nrun_id=" << state.run_id << "\nexpected=" << state.expected_messages
-              << "\nreceived=" << state.received_messages << "\nbytes=" << state.received_bytes
-              << "\nsequence_errors=" << state.sequence_errors
-              << "\ndata_errors=" << state.data_errors;
-
-    if (state.received_messages <= state.expected_messages) {
-        std::cout << "\nmissing=" << state.expected_messages - state.received_messages;
-    } else {
-        std::cout << "\nextra=" << state.received_messages - state.expected_messages;
-    }
-    std::cout << '\n';
-
     const double seconds = std::chrono::duration<double>(state.ended_at - state.started_at).count();
-    const double messages_per_second = seconds > 0 ? state.received_messages / seconds : 0;
     const double mib_per_second =
         seconds > 0 ? state.received_bytes / seconds / (1024.0 * 1024.0) : 0;
-
-    std::cout << "duration=" << seconds << " s"
-              << "\nreceive_rate=" << messages_per_second << " msg/s"
-              << "\nreceive_throughput=" << mib_per_second << " MiB/s\n";
-
-    const double send_rate = state.send_seconds > 0 ? state.sent_messages / state.send_seconds : 0;
+    const auto missing = state.expected_messages > state.received_messages
+                             ? state.expected_messages - state.received_messages : 0;
     const double send_throughput = state.send_seconds > 0
                                        ? state.sent_messages / state.send_seconds *
                                              state.expected_data_bytes / (1024.0 * 1024.0)
                                        : 0;
 
-    std::cout << "sent=" << state.sent_messages << "\nrejected=" << state.rejected_messages
-              << "\nsend_duration=" << state.send_seconds << " s"
-              << "\nsend_rate=" << send_rate << " msg/s"
+    std::cout << "[client]\nrun_id=" << state.run_id
+              << "\nmessage_size=" << state.expected_data_bytes / 1024.0 << " KiB"
+              << "\nduration=" << seconds << " s"
+              << "\nexpected=" << state.expected_messages
+              << "\nreceived=" << state.received_messages
+              << "\nmissing=" << missing
+              << "\nerrors=" << state.data_errors
+              << "\nsend_rejected=" << state.rejected_messages
               << "\ntarget=" << state.target_bytes_per_second / (1024.0 * 1024.0) << " MiB/s"
-              << "\nactual_send=" << send_throughput << " MiB/s\n";
+              << "\nsend_throughput=" << send_throughput << " MiB/s"
+              << "\nreceive_throughput=" << mib_per_second << " MiB/s"
+              << "\ndrain_time=" << state.drain_seconds << " s\n";
+}
+
+void record_send_duration(TestRunState& state, std::chrono::nanoseconds duration) {
+    const auto nanoseconds = static_cast<std::uint64_t>(duration.count());
+    std::lock_guard<std::mutex> lock(state.send_period_mutex);
+    ++state.period_send_samples;
+    state.period_send_nanoseconds += nanoseconds;
+    if (nanoseconds > state.period_send_max_nanoseconds) {
+        state.period_send_max_nanoseconds = nanoseconds;
+    }
 }
 
 // 调用者持有state.mutex；接收循环内检查时间，无消息到达时不刷新。
@@ -95,14 +102,33 @@ void report_test_progress(TestRunState& state) {
         return;
     }
 
-    const auto messages = state.received_messages - state.last_report_messages;
     const auto bytes = state.received_bytes - state.last_report_bytes;
+    std::uint64_t send_samples = 0;
+    std::uint64_t send_nanoseconds = 0;
+    std::uint64_t send_max_nanoseconds = 0;
+    {
+        std::lock_guard<std::mutex> lock(state.send_period_mutex);
+        send_samples = state.period_send_samples;
+        send_nanoseconds = state.period_send_nanoseconds;
+        send_max_nanoseconds = state.period_send_max_nanoseconds;
+        state.period_send_samples = 0;
+        state.period_send_nanoseconds = 0;
+        state.period_send_max_nanoseconds = 0;
+    }
+    const double send_average_microseconds =
+        send_samples > 0 ? send_nanoseconds / 1000.0 / send_samples : 0;
+    const double send_max_microseconds = send_max_nanoseconds / 1000.0;
+
     std::cout << "[client progress] run_id=" << state.run_id
-              << " received=" << state.received_messages << " rate=" << messages / seconds
-              << " msg/s"
-              << " throughput=" << bytes / seconds / (1024.0 * 1024.0) << " MiB/s"
-              << " sequence_errors=" << state.sequence_errors
-              << " data_errors=" << state.data_errors << std::endl;
+              << " message_size=" << state.expected_data_bytes / 1024.0 << " KiB"
+              << " duration=" << std::chrono::duration<double>(now - state.started_at).count() << " s"
+              << " expected=" << state.expected_messages
+              << " received=" << state.received_messages
+              << " errors=" << state.data_errors
+              << " target=" << state.target_bytes_per_second / (1024.0 * 1024.0) << " MiB/s"
+              << " send_avg=" << send_average_microseconds << " us"
+              << " send_max=" << send_max_microseconds << " us"
+              << " receive_throughput=" << bytes / seconds / (1024.0 * 1024.0) << " MiB/s" << std::endl;
 
     state.last_report_at = now;
     state.last_report_messages = state.received_messages;
@@ -147,6 +173,8 @@ bool handle_control_reply(const Message& message, TestRunState& state) {
 
     if (payload["phase"] == "end_ack" && state.phase == ClientPhase::WaitingEndAck) {
         state.ended_at = std::chrono::steady_clock::now();
+        state.drain_seconds =
+            std::chrono::duration<double>(state.ended_at - state.send_ended_at).count();
         state.phase = ClientPhase::Finished;
         return true;
     }
@@ -216,7 +244,7 @@ void receive_messages(int socket_fd, TestRunState& state) {
             if (payload.contains("sequence") && payload["sequence"].is_number_unsigned()) {
                 const auto sequence = payload["sequence"].get<std::uint64_t>();
                 if (sequence != state.next_expected_sequence) {
-                    ++state.sequence_errors;
+                    data_error = true;
                 }
                 state.next_expected_sequence = sequence + 1;
             } else {
@@ -404,7 +432,9 @@ int run_test(const std::string& host, const std::string& port,
                                       std::chrono::duration<double>(i * interval_seconds));
         test.payload["sequence"] = i;
 
+        const auto send_started_at = std::chrono::steady_clock::now();
         status = send_message(socket_fd.get(), test);
+        const auto send_finished_at = std::chrono::steady_clock::now();
 
         if (status == MessageStatus::Rejected) {
             ++rejected_messages;
@@ -416,6 +446,9 @@ int run_test(const std::string& host, const std::string& port,
             receiver.join();
             return 1;
         }
+        record_send_duration(
+            state, std::chrono::duration_cast<std::chrono::nanoseconds>(send_finished_at -
+                                                                        send_started_at));
         ++sent_messages;
     }
 
@@ -426,6 +459,7 @@ int run_test(const std::string& host, const std::string& port,
         state.sent_messages = sent_messages;
         state.rejected_messages = rejected_messages;
         state.send_seconds = std::chrono::duration<double>(send_ended_at - started_at).count();
+        state.send_ended_at = send_ended_at;
     }
 
     // 创建测试结束消息

@@ -15,25 +15,19 @@ Message make_test_error(const std::string& request, const std::string& code,
 
 // 统计输出函数
 void print_test_stats(const ServerTestState& state) {
-    std::cout << "[server]\nrun_id=" << state.run_id << "\nexpected=" << state.expected_messages
-              << "\nreceived=" << state.received_messages << "\nbytes=" << state.received_bytes
-              << "\nsequence_errors=" << state.sequence_errors
-              << "\ndata_errors=" << state.data_errors;
-
-    if (state.received_messages <= state.expected_messages) {
-        std::cout << "\nmissing=" << state.expected_messages - state.received_messages;
-    } else {
-        std::cout << " extra=" << state.received_messages - state.expected_messages;
-    }
-    std::cout << '\n';
-
     const double seconds = std::chrono::duration<double>(state.ended_at - state.started_at).count();
-    const double messages_per_second = seconds > 0 ? state.received_messages / seconds : 0;
     const double mib_per_second =
         seconds > 0 ? state.received_bytes / seconds / (1024.0 * 1024.0) : 0;
+    const auto missing = state.expected_messages > state.received_messages
+                             ? state.expected_messages - state.received_messages : 0;
 
-    std::cout << "duration=" << seconds << " s"
-              << "\nreceive_rate=" << messages_per_second << " msg/s"
+    std::cout << "[server]\nrun_id=" << state.run_id
+              << "\nmessage_size=" << state.expected_data_bytes / 1024.0 << " KiB"
+              << "\nduration=" << seconds << " s"
+              << "\nexpected=" << state.expected_messages
+              << "\nreceived=" << state.received_messages
+              << "\nmissing=" << missing
+              << "\nerrors=" << state.data_errors
               << "\nreceive_throughput=" << mib_per_second << " MiB/s\n";
 }
 
@@ -46,14 +40,14 @@ void report_test_progress(ServerTestState& state) {
         return;
     }
 
-    const auto messages = state.received_messages - state.last_report_messages;
     const auto bytes = state.received_bytes - state.last_report_bytes;
     std::cout << "[server progress] run_id=" << state.run_id
+              << " message_size=" << state.expected_data_bytes / 1024.0 << " KiB"
+              << " duration=" << std::chrono::duration<double>(now - state.started_at).count() << " s"
+              << " expected=" << state.expected_messages
               << " received=" << state.received_messages
-              << " rate=" << messages / seconds << " msg/s"
-              << " throughput=" << bytes / seconds / (1024.0 * 1024.0) << " MiB/s"
-              << " sequence_errors=" << state.sequence_errors
-              << " data_errors=" << state.data_errors << std::endl;
+              << " errors=" << state.data_errors
+              << " receive_throughput=" << bytes / seconds / (1024.0 * 1024.0) << " MiB/s" << std::endl;
 
     state.last_report_at = now;
     state.last_report_messages = state.received_messages;
@@ -76,7 +70,7 @@ Message handle_test(Message& request, ServerTestState& state) {
     if (payload.contains("sequence") && payload["sequence"].is_number_unsigned()) {
         const auto sequence = payload["sequence"].get<std::uint64_t>();
         if (sequence != state.next_expected_sequence) {
-            ++state.sequence_errors;
+            data_error = true;
         }
         state.next_expected_sequence = sequence + 1;
     } else {
@@ -101,6 +95,8 @@ Message handle_test(Message& request, ServerTestState& state) {
     if (data_error) {
         ++state.data_errors;
     }
+
+    report_test_progress(state);
 
     Message response;
     response.type = MessageType::Test;

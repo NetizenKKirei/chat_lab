@@ -19,7 +19,6 @@ struct ServerTestState {
     std::uint64_t received_messages = 0;
     std::uint64_t received_bytes = 0;
     std::uint64_t next_expected_sequence = 0;
-    std::uint64_t sequence_errors = 0;
     std::uint64_t data_errors = 0;
 
     // 时间戳

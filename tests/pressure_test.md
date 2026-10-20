@@ -60,15 +60,14 @@ TestControl = 8，Test = 7，保持现有协议帧格式。
 | received_messages | 成功解码、识别为 Test 的消息数，包含业务字段错误的消息 |
 | received_bytes | 可读取的 data 字符串字节数，不含 JSON 和协议头 |
 | next_expected_sequence | 下一条期望序号，初始为 0 |
-| sequence_errors | 合法序号与期望值不一致的次数 |
-| data_errors | Test字段或内容错误，每条最多计一次；完整帧JSON解析失败也计入此项 |
+| data_errors | Test字段、顺序或内容错误，每条最多计一次；完整帧JSON解析失败也计入此项 |
 
 每条 Test 先增加 received_messages。可读取的 data 字节累加到 received_bytes。
 序号能合法解析时：
 
 ```cpp
 if (sequence != stats.next_expected_sequence) {
-    ++stats.sequence_errors;
+    data_error = true;
 }
 stats.next_expected_sequence = sequence + 1;
 ```
@@ -133,12 +132,4 @@ stats.next_expected_sequence = sequence + 1;
 若在接收循环内按时间检查输出，无消息时不会刷新；若需要停流期间仍每秒显示，后续加入独立定时输出并同步读取统计。
 
 最终输出约定数、接收数、缺少或多收数、负载字节、异常计数、耗时与平均速率，以及正常结束或中断状态。
-客户端额外统计实际发送数量与速率；后续加入 RTT 和发送结束到 end_ack 的收尾耗时，不扩展服务端控制响应内容。
-
-## 7. 已实现与后续工作
-
-已实现两轮预设、开始/结束握手、独立接收线程、负载限速、两端接收统计与实时输出，
-以及客户端最终发送统计。发送计数在主线程局部累计，结束后一次性写回共享状态。
-
-待实现：等待超时、客户端异常路径的完整统计、RTT、发送阻塞耗时、收尾耗时及结果文件。
-现有协议测试仍是占位程序。性能测量使用Release构建，不能将应用JSON链路吞吐当作TCP带宽。
+客户端额外统计实际发送数量、发送拒绝数与速率；发送拒绝不计入接收数据错误。实时进度输出当前周期内成功调用 `send_message` 的平均和最大应用发送耗时，不在最终摘要重复输出。最终摘要的 `drain_time` 从发送循环结束计算到收到 `end_ack`，包含结束控制帧的发送与往返时间。后续加入 RTT，不扩展服务端控制响应内容。
